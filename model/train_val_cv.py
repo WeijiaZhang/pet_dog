@@ -5,8 +5,6 @@ import torch
 import torch.optim as optim
 from torch.autograd import Variable
 
-test_best_acc = 0.0
-
 
 def exp_lr_scheduler(optimizer, epoch, lr_decay_epoch=40,
                      init_lr=3e-4, init_wd=5e-3):
@@ -25,29 +23,36 @@ def exp_lr_scheduler(optimizer, epoch, lr_decay_epoch=40,
     return optimizer
 
 
-def freeze_lr_scheduler(model, optimizer, epoch, lr_decay_epoch=40,
-                        init_lr=1e-3, init_wd=5e-3):
+def cv_lr_scheduler(optimizer, epoch, init_lr=1e-3, init_wd=5e-3):
     """Decay learning rate by a factor of 0.1 every lr_decay_epoch epochs."""
-    lr = init_lr * (0.3**(epoch // lr_decay_epoch))
-    wd = init_wd * (0.8**(epoch // lr_decay_epoch))
+    lr = init_lr
+    wd = init_wd
+    low, high = 15, 40
+    if epoch == 0:
+        print('LR is set to {}'.format(lr))
+        print('weight decay is set to {}'.format(wd))
+    if epoch >= low or epoch < high:
+        lr = 3e-4
+        wd = 5e-3
+        if epoch == low:
+            print('LR is set to {}'.format(lr))
+            print('weight decay is set to {}'.format(wd))
 
-    if epoch % lr_decay_epoch == 0:
-        print('freeze: LR is set to {}'.format(lr))
-        print('freeze: weight decay is set to {}'.format(wd))
-    if epoch == 20:
-        for param in model.parameters():
-            param.requires_grad = True
-        optimizer = optim.SGD(filter(lambda p: p.requires_grad, model.parameters()),
-                              lr=init_lr, momentum=0.9, weight_decay=init_wd)
-        print('canceling freeze parameters ')
+    elif epoch >= high:
+        lr = 1e-4
+        wd = 5e-4
+        if epoch == high:
+            print('LR is set to {}'.format(lr))
+            print('weight decay is set to {}'.format(wd))
 
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
         param_group['weight_decay'] = wd
+
     return optimizer
 
 
-def train_epoch(epoch, model_name, model, data_loader, optimizer, criterion):
+def train_epoch_cv(epoch, model_name, model, data_loader, optimizer, criterion):
     model.train()
     use_cuda = torch.cuda.is_available()
     train_loss = 0
@@ -55,10 +60,7 @@ def train_epoch(epoch, model_name, model, data_loader, optimizer, criterion):
     total = 0
     train_loss_all = []
     train_acc_all = []
-    if 'freeze' in model_name:
-        optimizer = freeze_lr_scheduler(model, optimizer, epoch)
-    else:
-        optimizer = exp_lr_scheduler(optimizer, epoch)
+    optimizer = exp_lr_scheduler(optimizer, epoch)
     for batch_idx, (inputs, labels) in enumerate(data_loader):
         if use_cuda:
             inputs, labels = inputs.cuda(), labels.cuda()
@@ -84,15 +86,15 @@ def train_epoch(epoch, model_name, model, data_loader, optimizer, criterion):
     return train_loss_all, train_acc_all
 
 
-def test_epoch(epoch, model_name, model, data_loader, criterion):
+def test_epoch_cv(epoch, model_name, model, data_loader, criterion):
     model.eval()
     use_cuda = torch.cuda.is_available()
     test_loss = 0
+    test_best_acc = 0
     correct = 0
     total = 0
     pred_all = np.empty(0)
     true_all = np.empty(0)
-    global test_best_acc
     for batch_idx, (inputs, labels) in enumerate(data_loader):
         if use_cuda:
             inputs, labels = inputs.cuda(), labels.cuda()
@@ -111,9 +113,19 @@ def test_epoch(epoch, model_name, model, data_loader, criterion):
     true_all = np.array(true_all).reshape(-1, 1)
     pred_all = np.array(pred_all).reshape(-1, 1)
     print('\nTest set: Average loss: {:.4f}, Accuracy: {:.2f}%, Error: {:.2f}%'.format(test_loss, test_acc, test_err))
+    best_acc_path = '../checkpoint/best_acc_cv/%s.t7' % model_name
+    if os.path.isfile(best_acc_path):
+        temp = torch.load(best_acc_path)
+        test_best_acc = temp['test_best_acc']
+    else:
+        test_best_acc = 0.0
     if test_acc > test_best_acc:
         test_best_acc = test_acc
-        if test_best_acc > 75:
+        if not os.path.isdir('../checkpoint/best_acc_cv'):
+            os.mkdir('../checkpoint/best_acc_cv')
+        temp = {'test_best_acc': test_best_acc}
+        torch.save(temp, best_acc_path)
+        if test_best_acc > 79:
             print('Saving %s of epoch %i' %(model_name, epoch))
             state = {
                 'model_name': model_name+'_'+str(int(test_best_acc)),
@@ -121,9 +133,9 @@ def test_epoch(epoch, model_name, model, data_loader, criterion):
                 'test_best_acc': test_best_acc,
                 'epoch': epoch
             }
-            if not os.path.isdir('../checkpoint'):
-                os.mkdir('../checkpoint')
-            torch.save(state, '../checkpoint/%s_%i_ckpt.t7' % (model_name, test_best_acc))
+            if not os.path.isdir('../checkpoint/state_cv'):
+                os.mkdir('../checkpoint/state_cv')
+            torch.save(state,  '../checkpoint/state_cv/%s_%i_ckpt.t7' % (model_name, test_best_acc))
     test_best_err = 100 - test_best_acc
     print('best accuracy({:.2f}%), minimal error({:.2f})...\n'.format(test_best_acc, test_best_err))
     return true_all, pred_all
