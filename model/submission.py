@@ -12,10 +12,12 @@ import matplotlib.pyplot as plt
 import seaborn as sn
 
 
-state_path_101 = '../results/best_params/res101_73_ckpt.t7'
-state_path_v3 = '../results/best_params/inception_v3_73_ckpt.t7'
+# state_path_101 = '../results/best_params/res101_73_ckpt.t7'
+state_path_v3 = '../results/best_params/inception_v3_80_ckpt.t7'
 
-state_path_152 = '../results/best_params/res152_cv_1_80_49_ckpt.t7'
+state_path_161 = '../results/best_params/densenet161_80_ckpt.t7'
+state_path_152 = '../results/best_params/resnet152_80_ckpt.t7'
+
 train_data_path = '../processed/train_val10_299_1.t7'
 
 device_id_all = [0, 1, 2, 3]
@@ -26,13 +28,6 @@ use_cuda = torch.cuda.is_available()
 # num_ftrs = model_res101.fc.in_features
 # model_res101.fc = nn.Linear(num_ftrs, NUM_CLASSES)
 # model_res101 = nn.DataParallel(model_res101, device_ids=device_id_all)
-#
-# state_101 = torch.load(state_path_101)
-# model_name_101 = state_101['model_name']
-# state_dict_101 = state_101['model_param']
-# epoch_101 = state_101['epoch']
-# model_res101.load_state_dict(state_dict_101)
-# print(epoch_101, model_name_101)
 
 # load best resnet152
 model_res152 = models.resnet152()
@@ -40,32 +35,38 @@ num_ftrs = model_res152.fc.in_features
 model_res152.fc = nn.Linear(num_ftrs, NUM_CLASSES)
 model_res152 = nn.DataParallel(model_res152, device_ids=device_id_all)
 
-state_152 = torch.load(state_path_152)
-model_name_152 = state_152['model_name']
-state_dict_152 = state_152['model_param']
-best_acc = state_152['test_best_acc']
-epoch_152 = state_152['epoch']
-model_res152.load_state_dict(state_dict_152)
-print(epoch_152, model_name_152)
-print('best accuracy: %.2f' % best_acc)
 
 # load best inception v3
-# model_inc_v3 = models.inception_v3()
-# num_ftrs = model_inc_v3.fc.in_features
-# model_inc_v3.fc = nn.Linear(num_ftrs, NUM_CLASSES)
-# model_inc_v3 = nn.DataParallel(model_inc_v3, device_ids=device_id_all)
-#
-# state_v3 = torch.load(state_path_v3)
-# model_name_v3 = state_v3['model_name']
-# state_dict_v3 = state_v3['model_param']
-# epoch_v3 = state_v3['epoch']
-# model_inc_v3.load_state_dict(state_dict_v3)
-# print(epoch_v3, model_name_v3)
+model_inc_v3 = models.inception_v3()
+num_ftrs = model_inc_v3.fc.in_features
+model_inc_v3.fc = nn.Linear(num_ftrs, NUM_CLASSES)
+model_inc_v3 = nn.DataParallel(model_inc_v3, device_ids=device_id_all)
+
+# load best resnet161
+model_dense161 = models.densenet161()
+num_ftrs = model_dense161.classifier.in_features
+model_dense161.classifier = nn.Linear(num_ftrs, NUM_CLASSES)
+model_dense161 = nn.DataParallel(model_dense161, device_ids=device_id_all)
+
+
+def load_model(model, state_path):
+    state = torch.load(state_path)
+    model_name = state['model_name']
+    state_dict = state['model_param']
+    best_acc = state['test_best_acc']
+    epoch = state['epoch']
+    model.load_state_dict(state_dict)
+    print(epoch, model_name)
+    print('best accuracy: %.2f' % best_acc)
+    return model_name, model
+
+model_name_v3, model_inc_v3 = load_model(model_inc_v3, state_path_v3)
 
 if use_cuda:
     # model_res101.cuda()
-    # model_inc_v3.cuda()
-    model_res152.cuda()
+    model_inc_v3.cuda()
+    # model_res152.cuda()
+    # model_dense161.cuda()
 
 imgs_train, imgs_name_train, classes_train = [], [], []
 # read train dataset
@@ -129,7 +130,7 @@ def get_val_loader(cv_idx, val_data_cv):
     i_n_train, i_n_val = imgs_name_train_cv[i], imgs_name_val_cv[i]
     c_train, c_val = classes_train_cv[i], classes_val_cv[i]
     val_set = DogImageLoader(data_type='all', imgs=i_val, imgs_name=i_n_val,
-                             classes=c_val, transform=img_transform_299['val'])
+                             classes=c_val, transform=img_transform_256['val'])
     val_loader = data_utils.DataLoader(val_set, batch_size=BATCH_SIZE, shuffle=False, num_workers=4)
     print('val_set: %i' % len(val_set))
     return val_loader
@@ -182,7 +183,7 @@ def predict(model, data_loader):
 cs = nn.CrossEntropyLoss()
 train_data_cv, val_data_cv = cv_split(NUM_CV, imgs_train, imgs_name_train, classes_train)
 test_set = DogImageLoader(data_type='test', imgs=imgs_test, imgs_name=imgs_name_test,
-                          classes=classes_test, transform=img_transform_299['val'])
+                          classes=classes_test, transform=img_transform_256['val'])
 print('test_set: %i' % len(test_set))
 test_loader = data_utils.DataLoader(test_set, batch_size=BATCH_SIZE, shuffle=False,
                                     num_workers=4)
@@ -207,7 +208,7 @@ def format_pred(test_pred):
     return out
 
 output_df = format_pred(test_pred)
-output_df.to_csv('../results/base_%s.txt' % model_name_152, sep='\t', header=None, index=False)
+output_df.to_csv('../results/base_%s.txt' % model_name_v3, sep='\t', header=None, index=False)
 
 
 

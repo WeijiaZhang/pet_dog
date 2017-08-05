@@ -31,9 +31,17 @@ def get_resnet_152(num_classes, device_ids):
     model_152 = nn.DataParallel(model_152, device_ids=device_ids)
     return model_152
 
-model_res152_cv = []
+
+def get_densenet_161(num_classes, device_ids):
+    model_161 = models.densenet161(pretrained=True)
+    num_ftrs = model_161.classifier.in_features
+    model_161.classifier = nn.Linear(num_ftrs, num_classes)
+    model_161 = nn.DataParallel(model_161, device_ids=device_ids)
+    return model_161
+
+model_cv = []
 for i in range(NUM_CV):
-    model_res152_cv.append(get_resnet_152(NUM_CLASSES, device_id_all))
+    model_cv.append(get_densenet_161(NUM_CLASSES, device_id_all))
 
 # model_inc_v3 = models.inception_v3(pretrained=True)
 # num_ftrs = model_inc_v3.fc.in_features
@@ -43,18 +51,18 @@ for i in range(NUM_CV):
 if use_cuda:
     # model_inc_v3.cuda()
     # model_res101.cuda()
-    for model_152 in model_res152_cv:
-        model_152.cuda()
+    for model_i in model_cv:
+        model_i.cuda()
 
 cross_entropy = nn.CrossEntropyLoss()
 # sgd_res101 = optim.SGD(model_res101.parameters(), lr=3e-4, momentum=0.9, weight_decay=5e-3)
 # sgd_inc_v3 = optim.SGD(model_inc_v3.parameters(), lr=3e-4, momentum=0.9, weight_decay=5e-3)
 
-sgd_res152_cv = []
-for model_152 in model_res152_cv:
-    sgd_152 = optim.SGD(model_152.parameters(), lr=1e-3, momentum=0.9,
-                        weight_decay=5e-3)
-    sgd_res152_cv.append(sgd_152)
+sgd_cv = []
+for model_i in model_cv:
+    sgd_i = optim.SGD(model_i.parameters(), lr=3e-4, momentum=0.9,
+                      weight_decay=5e-3)
+    sgd_cv.append(sgd_i)
 
 
 # read train dataset
@@ -135,14 +143,15 @@ def get_loader_cv(train_data_cv, val_data_cv):
 
 train_loader_cv, val_loader_cv = get_loader_cv(train_data_cv, val_data_cv)
 
-model_name_all_cv = ['res152_cv_%i' % c for c in range(1, NUM_CV+1)]
-for i, train_loader in enumerate(train_loader_cv):
+model_name_all_cv = ['densenet161_cv_%i' % c for c in range(1, NUM_CV+1)]
+for i, in [0, 2, 4, 6, 8]:
+    train_loader = train_loader_cv[i]
     val_loader = val_loader_cv[i]
-    model_res152, sgd_res152 = model_res152_cv[i], sgd_res152_cv[i]
+    model_i, sgd_i = model_cv[i], sgd_cv[i]
     model_name = model_name_all_cv[i]
-    for epoch in range(60):
-        train_epoch_cv(epoch, model_name, model_res152, train_loader, sgd_res152, cross_entropy)
-        test_epoch_cv(epoch, model_name, model_res152, val_loader, cross_entropy)
-    model_res152.cpu()
+    for epoch in range(93):
+        train_epoch_cv(epoch, model_name, model_i, train_loader, sgd_i, cross_entropy)
+        test_epoch_cv(epoch, model_name, model_i, val_loader, cross_entropy)
+    model_i.cpu()
 
 

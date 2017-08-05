@@ -6,7 +6,7 @@ import torch.optim as optim
 from torch.autograd import Variable
 
 
-def exp_lr_scheduler(optimizer, epoch, lr_decay_epoch=40,
+def exp_lr_scheduler(model, optimizer, epoch, lr_decay_epoch=40,
                      init_lr=3e-4, init_wd=5e-3):
     """Decay learning rate by a factor of 0.1 every lr_decay_epoch epochs."""
     lr = init_lr * (0.6**(epoch // lr_decay_epoch))
@@ -60,7 +60,7 @@ def train_epoch_cv(epoch, model_name, model, data_loader, optimizer, criterion):
     total = 0
     train_loss_all = []
     train_acc_all = []
-    optimizer = exp_lr_scheduler(optimizer, epoch)
+    optimizer = exp_lr_scheduler(model, optimizer, epoch)
     for batch_idx, (inputs, labels) in enumerate(data_loader):
         if use_cuda:
             inputs, labels = inputs.cuda(), labels.cuda()

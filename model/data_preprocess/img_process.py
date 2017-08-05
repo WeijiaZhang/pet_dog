@@ -26,6 +26,7 @@ def read_class_name():
     class_to_idx = {class_name[i]: i for i in range(len(class_name))}
     return class_name, class_to_idx
 
+a = torchvision.datasets.ImageFolder()
 
 def read_img(train=True):
     imgs = []
@@ -155,7 +156,12 @@ img_transform_val_299 = transforms.Compose(
      transforms.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))]
 )
 
-img_transform = {
+img_transform_256 = {
+    'train': img_transform_train_256,
+    'val': img_transform_val_256
+}
+
+img_transform_299 = {
     'train': img_transform_train_299,
     'val': img_transform_val_299
 }

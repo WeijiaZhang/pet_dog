@@ -3,16 +3,16 @@ import numpy as np
 import os
 import torch
 import torch.optim as optim
+import torch.nn.functional as F
 from torch.autograd import Variable
-
-test_best_acc = 0.0
 
 
 def exp_lr_scheduler(optimizer, epoch, lr_decay_epoch=40,
-                     init_lr=3e-4, init_wd=5e-3):
+                     init_lr=3e-4, init_wd=5e-4):
     """Decay learning rate by a factor of 0.1 every lr_decay_epoch epochs."""
-    lr = init_lr * (0.6**(epoch // lr_decay_epoch))
-    wd = init_wd * (0.6**(epoch // lr_decay_epoch))
+    """Decay learning rate by a factor of 0.1 every lr_decay_epoch epochs."""
+    lr = init_lr * (0.6 ** (epoch // lr_decay_epoch))
+    wd = init_wd * (0.6 ** (epoch // lr_decay_epoch))
 
     if epoch % lr_decay_epoch == 0:
         print('LR is set to {}'.format(lr))
@@ -25,25 +25,45 @@ def exp_lr_scheduler(optimizer, epoch, lr_decay_epoch=40,
     return optimizer
 
 
-def freeze_lr_scheduler(model, optimizer, epoch, lr_decay_epoch=40,
-                        init_lr=1e-3, init_wd=5e-3):
+def freeze_lr_scheduler(model, fc_params, epoch, init_lr=1e-3, init_wd=5e-4):
     """Decay learning rate by a factor of 0.1 every lr_decay_epoch epochs."""
-    lr = init_lr * (0.3**(epoch // lr_decay_epoch))
-    wd = init_wd * (0.8**(epoch // lr_decay_epoch))
-
-    if epoch % lr_decay_epoch == 0:
-        print('freeze: LR is set to {}'.format(lr))
-        print('freeze: weight decay is set to {}'.format(wd))
-    if epoch == 20:
+    ignored_params = list(map(id, fc_params))
+    base_params = filter(lambda p: id(p) not in ignored_params,
+                         model.parameters())
+    lr = init_lr
+    wd = init_wd
+    base_lr = 1e-4
+    low, high = 15, 30
+    if epoch < low:
+        optimizer = optim.SGD([
+            {'params': base_params},
+            {'params': fc_params, 'lr': lr}
+        ], lr=base_lr, momentum=0.9, weight_decay=wd)
+        if epoch == 0:
+            print('freeze: LR is set to {}'.format(lr))
+            print('freeze: weight decay is set to {}'.format(wd))
+    elif epoch < high:
+        lr = 3e-4
+        wd = 5e-4
         for param in model.parameters():
             param.requires_grad = True
-        optimizer = optim.SGD(filter(lambda p: p.requires_grad, model.parameters()),
-                              lr=init_lr, momentum=0.9, weight_decay=init_wd)
-        print('canceling freeze parameters ')
-
-    for param_group in optimizer.param_groups:
-        param_group['lr'] = lr
-        param_group['weight_decay'] = wd
+        optimizer = optim.SGD([
+            {'params': base_params},
+            {'params': fc_params, 'lr': lr}
+        ], lr=base_lr, momentum=0.9, weight_decay=wd)
+        if epoch == low:
+            print('freeze: LR is set to {}'.format(lr))
+            print('freeze: weight decay is set to {}'.format(wd))
+    else:
+        lr = 1e-4
+        wd = 5e-4
+        optimizer = optim.SGD([
+            {'params': base_params},
+            {'params': fc_params, 'lr': lr}
+        ], lr=base_lr, momentum=0.9, weight_decay=wd)
+        if epoch == high:
+            print('freeze: LR is set to {}'.format(lr))
+            print('freeze: weight decay is set to {}'.format(wd))
     return optimizer
 
 
@@ -55,16 +75,14 @@ def train_epoch(epoch, model_name, model, data_loader, optimizer, criterion):
     total = 0
     train_loss_all = []
     train_acc_all = []
-    if 'freeze' in model_name:
-        optimizer = freeze_lr_scheduler(model, optimizer, epoch)
-    else:
-        optimizer = exp_lr_scheduler(optimizer, epoch)
+    optimizer = exp_lr_scheduler(optimizer, epoch)
     for batch_idx, (inputs, labels) in enumerate(data_loader):
         if use_cuda:
             inputs, labels = inputs.cuda(), labels.cuda()
         inputs, labels = Variable(inputs), Variable(labels)
         optimizer.zero_grad()
         outputs = model(inputs)
+        outputs = F.log_softmax(outputs)
         loss = criterion(outputs, labels)
         loss.backward()
         optimizer.step()
@@ -92,12 +110,12 @@ def test_epoch(epoch, model_name, model, data_loader, criterion):
     total = 0
     pred_all = np.empty(0)
     true_all = np.empty(0)
-    global test_best_acc
     for batch_idx, (inputs, labels) in enumerate(data_loader):
         if use_cuda:
             inputs, labels = inputs.cuda(), labels.cuda()
         inputs, labels = Variable(inputs, volatile=True), Variable(labels)
         outputs = model(inputs)
+        outputs = F.log_softmax(outputs)
         test_loss += criterion(outputs, labels).data[0]
         # get the index of the max log-probability
         _, predicted = torch.max(outputs.data, 1)
@@ -111,9 +129,19 @@ def test_epoch(epoch, model_name, model, data_loader, criterion):
     true_all = np.array(true_all).reshape(-1, 1)
     pred_all = np.array(pred_all).reshape(-1, 1)
     print('\nTest set: Average loss: {:.4f}, Accuracy: {:.2f}%, Error: {:.2f}%'.format(test_loss, test_acc, test_err))
+    best_acc_path = '../checkpoint/best_acc_cv/%s.t7' % model_name
+    if os.path.isfile(best_acc_path):
+        temp = torch.load(best_acc_path)
+        test_best_acc = temp['test_best_acc']
+    else:
+        test_best_acc = 0.0
     if test_acc > test_best_acc:
         test_best_acc = test_acc
-        if test_best_acc > 75:
+        if not os.path.isdir('../checkpoint/best_acc_cv'):
+            os.mkdir('../checkpoint/best_acc_cv')
+        temp = {'test_best_acc': test_best_acc}
+        torch.save(temp, best_acc_path)
+        if test_best_acc > 80:
             print('Saving %s of epoch %i' %(model_name, epoch))
             state = {
                 'model_name': model_name+'_'+str(int(test_best_acc)),
